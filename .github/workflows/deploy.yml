@@ -1,0 +1,172 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # Build & Deploy
+  # ────────────────────────────────────────────────────────────
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # ── Cloudflare DNS – idempotent CNAME upsert ──────────────
+      - name: Upsert Cloudflare DNS CNAME record
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_SUBDOMAIN: music.yumeth.com
+          CF_TARGET: venura9.github.io
+        run: |
+          set -euo pipefail
+
+          echo "Looking up existing CNAME record for ${CF_SUBDOMAIN} …"
+          EXISTING=$(curl -sSf \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?type=CNAME&name=${CF_SUBDOMAIN}")
+
+          RECORD_ID=$(echo "${EXISTING}" | jq -r '.result[0].id // empty')
+
+          PAYLOAD=$(jq -n \
+            --arg name "${CF_SUBDOMAIN}" \
+            --arg content "${CF_TARGET}" \
+            '{type:"CNAME", name:$name, content:$content, ttl:1, proxied:false}')
+
+          if [ -n "${RECORD_ID}" ]; then
+            echo "Updating existing record (id: ${RECORD_ID}) …"
+            curl -sSf -X PUT \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+              -d "${PAYLOAD}"
+          else
+            echo "Creating new CNAME record …"
+            curl -sSf -X POST \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records" \
+              -d "${PAYLOAD}"
+          fi
+          echo "DNS step complete."
+
+      # ── Deploy dist/ to gh-pages branch ───────────────────────
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          publish_dir: ./dist
+          cname: music.yumeth.com
+          force_orphan: true
+
+  # ────────────────────────────────────────────────────────────
+  # Update architecture docs
+  # ────────────────────────────────────────────────────────────
+  update-docs:
+    name: Update Architecture Docs
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      # ── Generate docs/diagrams/architecture.md ─────────────────
+      - name: Generate architecture diagram
+        run: |
+          mkdir -p docs/diagrams
+          cat > docs/diagrams/architecture.md << 'ARCH_EOF'
+          # Architecture — GitHub Pages + Cloudflare
+
+          ## Deployment pipeline
+          ```mermaid
+          flowchart TD
+              A[Developer<br/>git push to main] --> B[GitHub Actions<br/>npm ci + build]
+              B --> C[Cloudflare DNS step<br/>CNAME upsert via API]
+              B --> D[Deploy step<br/>peaceiris/actions-gh-pages]
+              C --> E[GitHub Pages<br/>custom domain + HTTPS]
+              D --> E
+              E --> F[Fan visits music.yumeth.com<br/>Deck of Cards smart link]
+          ```
+
+          ## DNS flow
+          ```mermaid
+          flowchart LR
+              A[music.yumeth.com] -->|CNAME DNS-only| B[venura9.github.io]
+              B -->|serves| C[React SPA<br/>gh-pages branch]
+          ```
+          ARCH_EOF
+
+      # ── Update README.md (idempotent) ──────────────────────────
+      - name: Update README architecture section
+        run: |
+          MARKER_START='<!-- ARCHITECTURE -->'
+          MARKER_END='<!-- /ARCHITECTURE -->'
+          README="README.md"
+
+          INNER_BLOCK='See full diagram: [docs/diagrams/architecture.md](docs/diagrams/architecture.md)
+          ```mermaid
+          flowchart TD
+              A[Developer<br/>git push to main] --> B[GitHub Actions]
+              B --> C[Cloudflare DNS<br/>CNAME upsert]
+              B --> D[gh-pages branch]
+              C --> E[GitHub Pages]
+              D --> E
+              E --> F[music.yumeth.com]
+          ```'
+
+          if grep -qF "${MARKER_START}" "${README}"; then
+            # Replace block between markers (in-place via awk)
+            awk -v start="${MARKER_START}" \
+                -v end="${MARKER_END}" \
+                -v block="${INNER_BLOCK}" '
+              $0 ~ start { print; print block; skip=1; next }
+              $0 ~ end   { skip=0 }
+              !skip       { print }
+            ' "${README}" > "${README}.tmp" && mv "${README}.tmp" "${README}"
+            echo "README architecture section updated."
+          else
+            # Append section
+            printf '\n## Architecture\n\n%s\n%s\n%s\n' \
+              "${MARKER_START}" "${INNER_BLOCK}" "${MARKER_END}" >> "${README}"
+            echo "README architecture section appended."
+          fi
+
+      # ── Commit & push if anything changed ─────────────────────
+      - name: Commit and push docs changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/diagrams/architecture.md README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "docs: update architecture diagrams [skip ci]"
+            git push
+          fi
