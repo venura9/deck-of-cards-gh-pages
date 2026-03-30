@@ -1,0 +1,96 @@
+name: Update Architecture Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # Update architecture docs
+  # ────────────────────────────────────────────────────────────
+  update-docs:
+    name: Update Architecture Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      # ── Generate docs/diagrams/architecture.md ─────────────────
+      - name: Generate architecture diagram
+        run: |
+          mkdir -p docs/diagrams
+          cat > docs/diagrams/architecture.md << 'ARCH_EOF'
+          # Architecture — GitHub Pages + Cloudflare
+
+          ## Deployment pipeline
+          ```mermaid
+          flowchart TD
+              A[Developer<br/>git push to main] --> B[GitHub Actions<br/>npm ci + build]
+              B --> C[Cloudflare DNS step<br/>CNAME upsert via API]
+              B --> D[Deploy step<br/>peaceiris/actions-gh-pages]
+              C --> E[GitHub Pages<br/>custom domain + HTTPS]
+              D --> E
+              E --> F[Fan visits music.yumeth.com<br/>Deck of Cards smart link]
+          ```
+
+          ## DNS flow
+          ```mermaid
+          flowchart LR
+              A[music.yumeth.com] -->|CNAME DNS-only| B[venura9.github.io]
+              B -->|serves| C[React SPA<br/>gh-pages branch]
+          ```
+          ARCH_EOF
+
+      # ── Update README.md (idempotent) ──────────────────────────
+      - name: Update README architecture section
+        run: |
+          MARKER_START='<!-- ARCHITECTURE -->'
+          MARKER_END='<!-- /ARCHITECTURE -->'
+          README="README.md"
+
+          INNER_BLOCK='See full diagram: [docs/diagrams/architecture.md](docs/diagrams/architecture.md)
+          ```mermaid
+          flowchart TD
+              A[Developer<br/>git push to main] --> B[GitHub Actions]
+              B --> C[Cloudflare DNS<br/>CNAME upsert]
+              B --> D[gh-pages branch]
+              C --> E[GitHub Pages]
+              D --> E
+              E --> F[music.yumeth.com]
+          ```'
+
+          if grep -qF "${MARKER_START}" "${README}"; then
+            # Replace block between markers (in-place via awk)
+            awk -v start="${MARKER_START}" \
+                -v end="${MARKER_END}" \
+                -v block="${INNER_BLOCK}" '
+              $0 ~ start { print; print block; skip=1; next }
+              $0 ~ end   { skip=0 }
+              !skip       { print }
+            ' "${README}" > "${README}.tmp" && mv "${README}.tmp" "${README}"
+            echo "README architecture section updated."
+          else
+            # Append section
+            printf '\n## Architecture\n\n%s\n%s\n%s\n' \
+              "${MARKER_START}" "${INNER_BLOCK}" "${MARKER_END}" >> "${README}"
+            echo "README architecture section appended."
+          fi
+
+      # ── Commit & push if anything changed ─────────────────────
+      - name: Commit and push docs changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/diagrams/architecture.md README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "docs: update architecture diagrams [skip ci]"
+            git push
+          fi
