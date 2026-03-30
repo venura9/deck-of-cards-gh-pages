@@ -38,7 +38,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-          CF_SUBDOMAIN: music.yumeth.com
+          CF_SUBDOMAIN: music.yumethathukorala.com
           CF_TARGET: venura9.github.io
         run: |
           set -euo pipefail
@@ -77,8 +77,8 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
-          cname: music.yumeth.com
+          cname: music.yumethathukorala.com
           force_orphan: true
 
