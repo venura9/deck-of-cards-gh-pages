@@ -8,12 +8,12 @@ flowchart TD
     B --> D[Deploy step<br/>peaceiris/actions-gh-pages]
     C --> E[GitHub Pages<br/>custom domain + HTTPS]
     D --> E
-    E --> F[Fan visits music.yumeth.com<br/>Deck of Cards smart link]
+    E --> F[Fan visits music.yumethathukorala.com<br/>Deck of Cards smart link]
 ```
 
 ## DNS flow
 ```mermaid
 flowchart LR
-    A[music.yumeth.com] -->|CNAME DNS-only| B[venura9.github.io]
+    A[music.yumethathukorala.com] -->|CNAME DNS-only| B[venura9.github.io]
     B -->|serves| C[React SPA<br/>gh-pages branch]
 ```
