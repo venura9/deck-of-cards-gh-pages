@@ -1,7 +1,6 @@
 # Architecture — GitHub Pages + Cloudflare
 
 ## Deployment pipeline
-
 ```mermaid
 flowchart TD
     A[Developer<br/>git push to main] --> B[GitHub Actions<br/>npm ci + build]
@@ -13,7 +12,6 @@ flowchart TD
 ```
 
 ## DNS flow
-
 ```mermaid
 flowchart LR
     A[music.yumeth.com] -->|CNAME DNS-only| B[venura9.github.io]

@@ -8,7 +8,6 @@ Built with React + TypeScript + Vite, hosted on GitHub Pages at [music.yumeth.co
 
 <!-- ARCHITECTURE -->
 See full diagram: [docs/diagrams/architecture.md](docs/diagrams/architecture.md)
-
 ```mermaid
 flowchart TD
     A[Developer<br/>git push to main] --> B[GitHub Actions]
